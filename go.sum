@@ -64,6 +64,10 @@ github.com/haproxytech/config-parser v1.0.0 h1:x6BQ5o5jzOq2QDApYwfFeidbKlS8d8F47
 github.com/haproxytech/config-parser v1.0.0/go.mod h1:se7v728KDunj+qz1kXFFFl+nDuoBdUaN5eYSi+gYjNM=
 github.com/haproxytech/models v1.0.1 h1:Eh3YXsec8zZWiabMWreXWLcg2/wKCnYOQcal07A/2MI=
 github.com/haproxytech/models v1.0.1/go.mod h1:UXZVErm/XN6z10sM/enmxrdeEnwo7vz1JI+a8ycEvOQ=
+github.com/haproxytech/config-parser v1.0.0 h1:x6BQ5o5jzOq2QDApYwfFeidbKlS8d8F474tHbzT/GIY=
+github.com/haproxytech/config-parser v1.0.0/go.mod h1:se7v728KDunj+qz1kXFFFl+nDuoBdUaN5eYSi+gYjNM=
+github.com/haproxytech/models v1.0.1-0.20190702103710-d0737e181d07 h1:DAEGhX47vcCMP55e3xIKePiNXlLaRCzCxaz06hAoN34=
+github.com/haproxytech/models v1.0.1-0.20190702103710-d0737e181d07/go.mod h1:UXZVErm/XN6z10sM/enmxrdeEnwo7vz1JI+a8ycEvOQ=
 github.com/jessevdk/go-flags v1.4.0 h1:4IU2WS7AumrZ/40jfhf4QVDMsQwqA7VEHozFRrGARJA=
 github.com/jessevdk/go-flags v1.4.0/go.mod h1:4FA24M0QyGHXBuZZK/XkWh8h0e1EYbRYJSGM75WSRxI=
 github.com/konsorten/go-windows-terminal-sequences v1.0.1/go.mod h1:T0+1ngSBFLxvqU3pZ+m/2kptfBszLMUkC4ZK/EgS/cQ=

@@ -5,11 +5,34 @@ import (
 	"log"
 	"os"
 
+	"github.com/pkg/errors"
+
 	runtimeClient "github.com/go-openapi/runtime/client"
 	"github.com/go-openapi/strfmt"
 	"github.com/haproxytech/dataplaneapi/client"
 	frontend "github.com/haproxytech/dataplaneapi/client/frontend"
 )
+
+//https://github.com/haproxy/haproxy/blob/master/doc/configuration.txt, 2.4. Time format
+type PostgresNode struct {
+	Name string
+	Host string
+	Port int
+}
+
+type PostgresCluster struct {
+	Name          string
+	BindPort      int
+	TimeoutClient int
+	TimeoutServer int
+	Servers       []PostgresNode
+}
+
+func EnsurePostgresCluster(pgCluster *PostgresCluster) (err error) {
+
+	err = errors.Wrap(err, "")
+	return
+}
 
 func main() {
 	// create the transport

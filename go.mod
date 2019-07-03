@@ -17,6 +17,7 @@ require (
 	github.com/haproxytech/models v1.0.1
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/konsorten/go-windows-terminal-sequences v1.0.2 // indirect
+	github.com/pkg/errors v0.8.1
 	github.com/rs/cors v1.6.0
 	github.com/sirupsen/logrus v1.4.2
 	golang.org/x/net v0.0.0-20190607181551-461777fb6f67

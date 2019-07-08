@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/pkg/errors"
 
 	"github.com/go-openapi/runtime"
@@ -15,6 +16,7 @@ import (
 	"github.com/haproxytech/dataplaneapi/client"
 	"github.com/haproxytech/dataplaneapi/client/bind"
 	frontend "github.com/haproxytech/dataplaneapi/client/frontend"
+	"github.com/haproxytech/dataplaneapi/client/transactions"
 	"github.com/haproxytech/models"
 )
 
@@ -32,19 +34,23 @@ type DbCluster struct {
 }
 
 func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoWriter, dbCluster *DbCluster) (err error) {
+	var version int64
+	var txnID string
+	var txnClient *transactions.Client
+	var frtsRsp *frontend.GetFrontendsOK
 	var frtRsp *frontend.GetFrontendOK
 	var bndsRsp *bind.GetBindsOK
 	frontendName := dbCluster.Name + "-front"
-	backendName := dbCluster.Name + "-back"
+	//backendName := dbCluster.Name + "-back"
 	tcpTimeout := int64(600 * 1000) //10 minutes
 	maxConn := int64(3000)
 	bindPort := int64(dbCluster.BindPort)
 	frtModExp := &models.Frontend{
-		ClientTimeout:  &tcpTimeout,
-		DefaultBackend: backendName,
-		Maxconn:        &maxConn,
-		Mode:           "tcp",
-		Name:           frontendName,
+		ClientTimeout: &tcpTimeout,
+		//DefaultBackend: backendName,
+		Maxconn: &maxConn,
+		Mode:    "tcp",
+		Name:    frontendName,
 	}
 	bndsModExp := models.Binds{
 		&models.Bind{
@@ -82,6 +88,12 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	var frtMod *models.Frontend
 	var bndsMod models.Binds
 	frtClient := frontend.New(rt, strfmt.Default)
+	if frtsRsp, err = frtClient.GetFrontends(nil, authInfo); err != nil {
+		err = errors.Wrap(err, "")
+		return
+	}
+	version = frtsRsp.Payload.Version
+
 	if frtRsp, err = frtClient.GetFrontend(frontend.NewGetFrontendParams().WithName(frontendName), authInfo); err != nil {
 		if _, ok := err.(*frontend.GetFrontendNotFound); ok {
 			err = nil
@@ -101,6 +113,10 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 			return
 		}
 	} else {
+		if bndsRsp.Payload.Version != version {
+			err = errors.Errorf("version changed during fetching configuration")
+			return
+		}
 		bndsMod = bndsRsp.Payload.Data
 	}
 
@@ -122,14 +138,24 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 		srvsMod := srvsRsp.Payload.Data
 	*/
 
+	if !reflect.DeepEqual(frtModExp, frtMod) || !reflect.DeepEqual(bndsModExp, bndsMod) {
+		txnClient = transactions.New(rt, strfmt.Default)
+		var txnRsp *transactions.StartTransactionCreated
+		if txnRsp, err = txnClient.StartTransaction(transactions.NewStartTransactionParams().WithVersion(version), authInfo); err != nil {
+			err = errors.Wrap(err, "")
+			return
+		}
+		txnID = txnRsp.Payload.ID
+	}
+
 	if !reflect.DeepEqual(frtModExp, frtMod) {
 		if frtMod == nil {
-			if _, _, err = frtClient.CreateFrontend(frontend.NewCreateFrontendParams().WithData(frtModExp), authInfo); err != nil {
+			if _, _, err = frtClient.CreateFrontend(frontend.NewCreateFrontendParams().WithTransactionID(&txnID).WithData(frtModExp), authInfo); err != nil {
 				err = errors.Wrap(err, "")
 				return
 			}
 		} else {
-			if _, _, err = frtClient.ReplaceFrontend(frontend.NewReplaceFrontendParams().WithData(frtModExp), authInfo); err != nil {
+			if _, _, err = frtClient.ReplaceFrontend(frontend.NewReplaceFrontendParams().WithTransactionID(&txnID).WithData(frtModExp), authInfo); err != nil {
 				err = errors.Wrap(err, "")
 				return
 			}
@@ -138,13 +164,13 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	// binds
 	if !reflect.DeepEqual(bndsModExp, bndsMod) {
 		// TODO: delete all binds
-		if frtMod == nil {
-			if _, _, err = bndClient.CreateBind(bind.NewCreateBindParams().WithData(bndsModExp[0]), authInfo); err != nil {
+		if bndsMod == nil {
+			if _, _, err = bndClient.CreateBind(bind.NewCreateBindParams().WithTransactionID(&txnID).WithFrontend(frontendName).WithData(bndsModExp[0]), authInfo); err != nil {
 				err = errors.Wrap(err, "")
 				return
 			}
 		} else {
-			if _, _, err = bndClient.ReplaceBind(bind.NewReplaceBindParams().WithData(bndsModExp[0]).WithFrontend(frontendName).WithName("bind1"), authInfo); err != nil {
+			if _, _, err = bndClient.ReplaceBind(bind.NewReplaceBindParams().WithTransactionID(&txnID).WithFrontend(frontendName).WithData(bndsModExp[0]), authInfo); err != nil {
 				err = errors.Wrap(err, "")
 				return
 			}
@@ -153,10 +179,17 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	// backend
 	// servers
 
+	if txnID != "" {
+		if _, _, err = txnClient.CommitTransaction(transactions.NewCommitTransactionParams().WithID(txnID), authInfo); err != nil {
+			err = errors.Wrap(err, "")
+			return
+		}
+	}
 	return
 }
 
 func main() {
+	spew.Config = spew.ConfigState{ContinueOnMethod: true}
 	// create the transport
 	rt := runtimeClient.New(os.Getenv("HAPROXY_DATAPLANE_ADDR"), client.DefaultBasePath, []string{"http"})
 	authInfo := runtimeClient.BasicAuth("admin", "mypassword")
@@ -169,7 +202,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("got error %+v", err)
 	}
-	fmt.Printf("response: %#v\n", resp.Payload)
+	fmt.Printf("response: %s\n", spew.Sdump(resp.Payload))
 
 	dbCluster := &DbCluster{
 		Name:     "pg",
@@ -193,6 +226,6 @@ func main() {
 		},
 	}
 	if err = EnsureDbCluster(rt, authInfo, dbCluster); err != nil {
-		log.Fatalf("got error %+v", err)
+		log.Fatalf("got error %s\n%+v", spew.Sdump(err), err)
 	}
 }

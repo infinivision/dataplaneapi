@@ -37,6 +37,7 @@ type DbCluster struct {
 func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoWriter, dbCluster *DbCluster) (err error) {
 	var version int64
 	var txnID string
+	var needCommitTxn bool
 	var txnClient *transactions.Client
 	var frtsRsp *frontend.GetFrontendsOK
 	var frtRsp *frontend.GetFrontendOK
@@ -96,7 +97,15 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	}
 	version = frtsRsp.Payload.Version
 
-	if frtRsp, err = frtClient.GetFrontend(frontend.NewGetFrontendParams().WithName(frontendName), authInfo); err != nil {
+	txnClient = transactions.New(rt, strfmt.Default)
+	var txnRsp *transactions.StartTransactionCreated
+	if txnRsp, err = txnClient.StartTransaction(transactions.NewStartTransactionParams().WithVersion(version), authInfo); err != nil {
+		err = errors.Wrap(err, "")
+		return
+	}
+	txnID = txnRsp.Payload.ID
+
+	if frtRsp, err = frtClient.GetFrontend(frontend.NewGetFrontendParams().WithTransactionID(&txnID).WithName(frontendName), authInfo); err != nil {
 		if _, ok := err.(*frontend.GetFrontendNotFound); ok {
 			err = nil
 		} else {
@@ -107,7 +116,7 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 		frtMod = frtRsp.Payload.Data
 	}
 	bndClient := bind.New(rt, strfmt.Default)
-	if bndsRsp, err = bndClient.GetBinds(bind.NewGetBindsParams().WithFrontend(frontendName), authInfo); err != nil {
+	if bndsRsp, err = bndClient.GetBinds(bind.NewGetBindsParams().WithTransactionID(&txnID).WithFrontend(frontendName), authInfo); err != nil {
 		if _, ok := err.(*bind.GetBindsDefault); ok {
 			err = nil
 		} else {
@@ -121,7 +130,7 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	var bkdMod *models.Backend
 	var srvsMod models.Servers
 	bkdClient := backend.New(rt, strfmt.Default)
-	if bkdRsp, err = bkdClient.GetBackend(backend.NewGetBackendParams().WithName(backendName), authInfo); err != nil {
+	if bkdRsp, err = bkdClient.GetBackend(backend.NewGetBackendParams().WithTransactionID(&txnID).WithName(backendName), authInfo); err != nil {
 		if _, ok := err.(*backend.GetBackendNotFound); ok {
 			err = nil
 		} else {
@@ -133,7 +142,7 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	}
 
 	srvClient := server.New(rt, strfmt.Default)
-	if srvsRsp, err = srvClient.GetServers(server.NewGetServersParams().WithBackend(backendName), authInfo); err != nil {
+	if srvsRsp, err = srvClient.GetServers(server.NewGetServersParams().WithTransactionID(&txnID).WithBackend(backendName), authInfo); err != nil {
 		if _, ok := err.(*server.GetServersDefault); ok {
 			err = nil
 		} else {
@@ -144,18 +153,9 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 		srvsMod = srvsRsp.Payload.Data
 	}
 
-	if !reflect.DeepEqual(frtModExp, frtMod) || !reflect.DeepEqual(bndsModExp, bndsMod) || !reflect.DeepEqual(bkdModExp, bkdMod) || !reflect.DeepEqual(srvsModExp, srvsMod) {
-		txnClient = transactions.New(rt, strfmt.Default)
-		var txnRsp *transactions.StartTransactionCreated
-		if txnRsp, err = txnClient.StartTransaction(transactions.NewStartTransactionParams().WithVersion(version), authInfo); err != nil {
-			err = errors.Wrap(err, "")
-			return
-		}
-		txnID = txnRsp.Payload.ID
-	}
-
 	// ensure frontend
 	if !reflect.DeepEqual(frtModExp, frtMod) {
+		needCommitTxn = true
 		if frtMod == nil {
 			if _, _, err = frtClient.CreateFrontend(frontend.NewCreateFrontendParams().WithTransactionID(&txnID).WithData(frtModExp), authInfo); err != nil {
 				err = errors.Wrap(err, "")
@@ -170,6 +170,7 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	}
 	// ensure binds
 	if !reflect.DeepEqual(bndsModExp, bndsMod) {
+		needCommitTxn = true
 		if bndsMod != nil {
 			for _, bndMod := range bndsMod {
 				if _, _, err = bndClient.DeleteBind(bind.NewDeleteBindParams().WithTransactionID(&txnID).WithFrontend(frontendName).WithName(bndMod.Name), authInfo); err != nil {
@@ -185,6 +186,7 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	}
 	// ensure backend
 	if !reflect.DeepEqual(bkdModExp, bkdMod) {
+		needCommitTxn = true
 		if bkdMod == nil {
 			if _, _, err = bkdClient.CreateBackend(backend.NewCreateBackendParams().WithTransactionID(&txnID).WithData(bkdModExp), authInfo); err != nil {
 				err = errors.Wrap(err, "")
@@ -199,6 +201,7 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	}
 	// ensure servers
 	if !reflect.DeepEqual(srvsModExp, srvsMod) {
+		needCommitTxn = true
 		if srvsMod != nil {
 			for _, srvMod := range srvsMod {
 				if _, _, err = srvClient.DeleteServer(server.NewDeleteServerParams().WithTransactionID(&txnID).WithBackend(backendName).WithName(srvMod.Name), authInfo); err != nil {
@@ -215,8 +218,13 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 		}
 	}
 
-	if txnID != "" {
+	if needCommitTxn {
 		if _, _, err = txnClient.CommitTransaction(transactions.NewCommitTransactionParams().WithID(txnID), authInfo); err != nil {
+			err = errors.Wrap(err, "")
+			return
+		}
+	} else {
+		if _, err = txnClient.DeleteTransaction(transactions.NewDeleteTransactionParams().WithID(txnID), authInfo); err != nil {
 			err = errors.Wrap(err, "")
 			return
 		}

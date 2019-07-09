@@ -163,17 +163,17 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	}
 	// binds
 	if !reflect.DeepEqual(bndsModExp, bndsMod) {
-		// TODO: delete all binds
-		if bndsMod == nil {
-			if _, _, err = bndClient.CreateBind(bind.NewCreateBindParams().WithTransactionID(&txnID).WithFrontend(frontendName).WithData(bndsModExp[0]), authInfo); err != nil {
-				err = errors.Wrap(err, "")
-				return
+		if bndsMod != nil {
+			for _, bndMod := range bndsMod {
+				if _, _, err = bndClient.DeleteBind(bind.NewDeleteBindParams().WithTransactionID(&txnID).WithFrontend(frontendName).WithName(bndMod.Name), authInfo); err != nil {
+					err = errors.Wrap(err, "")
+					return
+				}
 			}
-		} else {
-			if _, _, err = bndClient.ReplaceBind(bind.NewReplaceBindParams().WithTransactionID(&txnID).WithFrontend(frontendName).WithData(bndsModExp[0]), authInfo); err != nil {
-				err = errors.Wrap(err, "")
-				return
-			}
+		}
+		if _, _, err = bndClient.CreateBind(bind.NewCreateBindParams().WithTransactionID(&txnID).WithFrontend(frontendName).WithData(bndsModExp[0]), authInfo); err != nil {
+			err = errors.Wrap(err, "")
+			return
 		}
 	}
 	// backend

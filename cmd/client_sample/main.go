@@ -1,9 +1,7 @@
 package main
 
 import (
-	"log"
 	"os"
-	"reflect"
 	"sort"
 
 	"github.com/davecgh/go-spew/spew"
@@ -12,6 +10,7 @@ import (
 	"github.com/go-openapi/runtime"
 	runtimeClient "github.com/go-openapi/runtime/client"
 	"github.com/go-openapi/strfmt"
+	"github.com/google/go-cmp/cmp"
 	"github.com/haproxytech/dataplaneapi/client"
 	"github.com/haproxytech/dataplaneapi/client/backend"
 	"github.com/haproxytech/dataplaneapi/client/bind"
@@ -19,6 +18,7 @@ import (
 	"github.com/haproxytech/dataplaneapi/client/server"
 	"github.com/haproxytech/dataplaneapi/client/transactions"
 	"github.com/haproxytech/models"
+	log "github.com/sirupsen/logrus"
 )
 
 //https://github.com/haproxy/haproxy/blob/master/doc/configuration.txt, 2.4. Time format
@@ -67,13 +67,14 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	bkdModExp := &models.Backend{
 		Balance: &models.Balance{
 			Algorithm: "roundrobin",
+			Arguments: []string{},
 		},
 		Mode:          "tcp",
 		Name:          backendName,
 		ServerTimeout: &tcpTimeout,
 	}
 
-	srvsModExp := make([]*models.Server, 0)
+	srvsModExp := models.Servers{}
 	for _, node := range dbCluster.Nodes {
 		port := int64(node.Port)
 		srv := &models.Server{
@@ -154,8 +155,10 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	}
 
 	// ensure frontend
-	if !reflect.DeepEqual(frtModExp, frtMod) {
+	diff := cmp.Diff(frtMod, frtModExp)
+	if diff != "" {
 		needCommitTxn = true
+		log.Infof("frontend difference: %s", diff)
 		if frtMod == nil {
 			if _, _, err = frtClient.CreateFrontend(frontend.NewCreateFrontendParams().WithTransactionID(&txnID).WithData(frtModExp), authInfo); err != nil {
 				err = errors.Wrap(err, "")
@@ -169,8 +172,10 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 		}
 	}
 	// ensure binds
-	if !reflect.DeepEqual(bndsModExp, bndsMod) {
+	diff = cmp.Diff(bndsMod, bndsModExp)
+	if diff != "" {
 		needCommitTxn = true
+		log.Infof("binds difference: %s", diff)
 		if bndsMod != nil {
 			for _, bndMod := range bndsMod {
 				if _, _, err = bndClient.DeleteBind(bind.NewDeleteBindParams().WithTransactionID(&txnID).WithFrontend(frontendName).WithName(bndMod.Name), authInfo); err != nil {
@@ -185,8 +190,10 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 		}
 	}
 	// ensure backend
-	if !reflect.DeepEqual(bkdModExp, bkdMod) {
+	diff = cmp.Diff(bkdMod, bkdModExp)
+	if diff != "" {
 		needCommitTxn = true
+		log.Infof("backend difference: %s", diff)
 		if bkdMod == nil {
 			if _, _, err = bkdClient.CreateBackend(backend.NewCreateBackendParams().WithTransactionID(&txnID).WithData(bkdModExp), authInfo); err != nil {
 				err = errors.Wrap(err, "")
@@ -200,7 +207,9 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 		}
 	}
 	// ensure servers
-	if !reflect.DeepEqual(srvsModExp, srvsMod) {
+	diff = cmp.Diff(srvsMod, srvsModExp)
+	if diff != "" {
+		log.Infof("servers difference: %s", diff)
 		needCommitTxn = true
 		if srvsMod != nil {
 			for _, srvMod := range srvsMod {

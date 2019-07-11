@@ -209,8 +209,8 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	// ensure servers
 	diff = cmp.Diff(srvsMod, srvsModExp)
 	if diff != "" {
-		log.Infof("servers difference: %s", diff)
 		needCommitTxn = true
+		log.Infof("servers difference: %s", diff)
 		if srvsMod != nil {
 			for _, srvMod := range srvsMod {
 				if _, _, err = srvClient.DeleteServer(server.NewDeleteServerParams().WithTransactionID(&txnID).WithBackend(backendName).WithName(srvMod.Name), authInfo); err != nil {
@@ -232,11 +232,13 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 			err = errors.Wrap(err, "")
 			return
 		}
+		log.Infof("DbCluster %s didn't match the expectation, has been fixed in transaction %s(version=%d)", dbCluster.Name, txnID, version+1)
 	} else {
 		if _, err = txnClient.DeleteTransaction(transactions.NewDeleteTransactionParams().WithID(txnID), authInfo); err != nil {
 			err = errors.Wrap(err, "")
 			return
 		}
+		log.Infof("DbCluster %s matchs the expectation", dbCluster.Name)
 	}
 	return
 }
@@ -264,17 +266,17 @@ func main() {
 		BindPort: 12345,
 		Nodes: []DbNode{
 			DbNode{
-				Name: "keeper0",
+				Name: "pg0",
 				Host: "127.0.0.1",
 				Port: 10000,
 			},
 			DbNode{
-				Name: "keeper1",
+				Name: "pg1",
 				Host: "127.0.0.1",
 				Port: 10001,
 			},
 			DbNode{
-				Name: "keeper2",
+				Name: "pg2",
 				Host: "127.0.0.1",
 				Port: 10002,
 			},

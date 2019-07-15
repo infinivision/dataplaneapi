@@ -211,18 +211,51 @@ func EnsureDbCluster(rt *runtimeClient.Runtime, authInfo runtime.ClientAuthInfoW
 	if diff != "" {
 		needCommitTxn = true
 		log.Infof("servers difference: %s", diff)
-		if srvsMod != nil {
-			for _, srvMod := range srvsMod {
-				if _, _, err = srvClient.DeleteServer(server.NewDeleteServerParams().WithTransactionID(&txnID).WithBackend(backendName).WithName(srvMod.Name), authInfo); err != nil {
-					err = errors.Wrap(err, "")
-					return
+		for _, srvMod := range srvsMod {
+			var srvModExp *models.Server
+			var found bool
+			for _, srvModExp = range srvsModExp {
+				if srvModExp.Name == srvMod.Name {
+					found = true
+					break
+				}
+			}
+			if found {
+				diff = cmp.Diff(srvMod, srvModExp)
+				if diff != "" {
+					if _, _, err = srvClient.ReplaceServer(server.NewReplaceServerParams().WithTransactionID(&txnID).WithBackend(backendName).WithName(srvMod.Name).WithData(srvModExp), authInfo); err != nil {
+						err = errors.Wrap(err, "")
+						return
+					}
+				}
+			} else {
+				if srvMod.Disabled {
+					if _, _, err = srvClient.DeleteServer(server.NewDeleteServerParams().WithTransactionID(&txnID).WithBackend(backendName).WithName(srvMod.Name), authInfo); err != nil {
+						err = errors.Wrap(err, "")
+						return
+					}
+				} else {
+					srvMod.Disabled = true
+					if _, _, err = srvClient.ReplaceServer(server.NewReplaceServerParams().WithTransactionID(&txnID).WithBackend(backendName).WithName(srvMod.Name).WithData(srvMod), authInfo); err != nil {
+						err = errors.Wrap(err, "")
+						return
+					}
 				}
 			}
 		}
 		for _, srvModExp := range srvsModExp {
-			if _, _, err = srvClient.CreateServer(server.NewCreateServerParams().WithTransactionID(&txnID).WithBackend(backendName).WithData(srvModExp), authInfo); err != nil {
-				err = errors.Wrap(err, "")
-				return
+			var found bool
+			for _, srvMod := range srvsMod {
+				if srvModExp.Name == srvMod.Name {
+					found = true
+					break
+				}
+			}
+			if !found {
+				if _, _, err = srvClient.CreateServer(server.NewCreateServerParams().WithTransactionID(&txnID).WithBackend(backendName).WithData(srvModExp), authInfo); err != nil {
+					err = errors.Wrap(err, "")
+					return
+				}
 			}
 		}
 	}
